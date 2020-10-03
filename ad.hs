@@ -1,38 +1,41 @@
 import qualified Data.Map
 
-data Tensor = Scalar Float VJP
-type VJP = Tensor -> [(String, Tensor)]
+data Tensor a = Scalar a (VJP a)
+type VJP a = Tensor a -> [(String, Tensor a)]
 
-tag :: String -> Tensor -> Tensor
+tag :: String -> Tensor a -> Tensor a
 tag name (Scalar x vjp) = Scalar x (\g -> (name, g) : vjp g)
 
-grad :: [String] -> Tensor -> [Tensor]
+grad :: Num a => [String] -> Tensor a -> [Tensor a]
 grad keys (Scalar _ vjp) = mapM lookup_exn keys accumulate_keys
   where accumulate_keys = Data.Map.fromListWith ( + ) (vjp 1)
         lookup_exn key map = let (Just ret) = Data.Map.lookup key map in ret
+
+stopgrad :: Tensor a -> Tensor a
+stopgrad (Scalar x _) = Scalar x (\g -> [])
         
-instance Eq Tensor where
+instance Eq a => Eq (Tensor a) where
   (Scalar a _) == (Scalar b _) = a == b
 
-instance Ord Tensor where
+instance Ord a => Ord (Tensor a) where
   compare (Scalar a _) (Scalar b _) = compare a b
 
-instance Show Tensor where
+instance Show a => Show (Tensor a) where
   show (Scalar x _) = show x
 
-instance Num Tensor where
+instance Num a => Num (Tensor a) where
   sa@(Scalar a vjpa) * sb@(Scalar b vjpb) = Scalar (a * b) (\g -> vjpa (g * sb) ++ vjpb (g * sa))
   (Scalar a vjpa) + (Scalar b vjpb) = Scalar (a + b) (\g -> vjpa g ++ vjpb g)
   abs sa@(Scalar a vjp) = Scalar (abs a) (\g -> vjp (signum sa * g))
   fromInteger a = Scalar (fromInteger a) (\g -> [])
   negate (Scalar a vjp) = Scalar (negate a) (\g -> vjp (negate g))
-  signum (Scalar a vjp) = Scalar (signum a) (\g -> vjp 0.0)
+  signum (Scalar a vjp) = Scalar (signum a) (\g -> vjp 0)
 
-instance Fractional Tensor where
+instance Fractional a => Fractional (Tensor a) where
   recip sa@(Scalar a vjp) = Scalar (recip a) (\g -> vjp (-g/(sa*sa)))
   fromRational a = Scalar (fromRational a) (\g -> [])
 
-instance Floating Tensor where
+instance Floating a => Floating (Tensor a) where
   pi = Scalar pi (\g -> [])
   exp sa@(Scalar a vjp) = Scalar (exp a) (\g -> vjp (g * exp sa))
   log sa@(Scalar a vjp) = Scalar (log a) (\g -> vjp (g / sa))
@@ -49,10 +52,11 @@ instance Floating Tensor where
 
 main :: IO ()
 main =
-  let a = tag "a" 4
-      b = a ** 2 + 3 * a
-      [first_deriv] = grad ["a"] b
-      [second_deriv] = grad ["a"] first_deriv
-  in do putStrLn . show $ b
-        putStrLn . show $ first_deriv
-        putStrLn . show $ second_deriv
+  let x = tag "x" 4
+      f = x ^ 2 + stopgrad (3 * x)
+      [f'] = grad ["x"] f
+      [f''] = grad ["x"] f'
+  in do putStrLn $ "x = " ++ show x
+        putStrLn $ "f(x) = " ++ show f
+        putStrLn $ "f'(x) = " ++ show f'
+        putStrLn $ "f''(x) = " ++ show f''
