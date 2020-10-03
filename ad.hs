@@ -14,7 +14,7 @@ grad keys tensor = mapM lookup_exn keys accumulate_keys
         lookup_exn key map = let (Just ret) = Data.Map.lookup key map in ret
 
 stopgrad :: Tensor a -> Tensor a
-stopgrad tensor = tensor { vjp = \g -> [] }
+stopgrad tensor = tensor { vjp = const [] }
         
 instance Eq a => Eq (Tensor a) where
   ta == tb = val ta == val tb
@@ -29,16 +29,16 @@ instance Num a => Num (Tensor a) where
   ta * tb = Tensor { val = val ta * val tb, vjp = \g -> vjp ta (g * tb) ++ vjp tb (g * ta) }
   ta + tb = Tensor { val = val ta + val tb, vjp = \g -> vjp ta g ++ vjp tb g }
   abs ta = Tensor { val = abs (val ta), vjp = \g -> vjp ta (g * signum ta) }
-  fromInteger v = Tensor { val = fromInteger v, vjp = \g -> [] }
-  negate ta = Tensor { val = negate (val ta), vjp = \g -> vjp ta (negate g) }
+  fromInteger v = Tensor { val = fromInteger v, vjp = const [] }
+  negate ta = Tensor { val = negate (val ta), vjp = vjp ta . negate }
   signum ta = Tensor { val = signum (val ta), vjp = \g -> vjp ta 0 }
 
 instance Fractional a => Fractional (Tensor a) where
   recip ta = Tensor { val = recip (val ta), vjp = \g -> vjp ta (-g / (ta * ta)) }
-  fromRational v = Tensor { val = fromRational v, vjp = \g -> [] }
+  fromRational v = Tensor { val = fromRational v, vjp = const [] }
 
 instance Floating a => Floating (Tensor a) where
-  pi = Tensor { val = pi, vjp = \g -> [] }
+  pi = Tensor { val = pi, vjp = const [] }
   exp ta = Tensor { val = exp (val ta), vjp = \g -> vjp ta (g * exp ta) }
   log ta = Tensor { val = log (val ta), vjp = \g -> vjp ta (g / ta) }
   sin ta = Tensor { val = sin (val ta), vjp = \g -> vjp ta (g * cos ta) }
@@ -52,10 +52,8 @@ instance Floating a => Floating (Tensor a) where
   acosh ta = Tensor { val = acosh (val ta), vjp = \g -> vjp ta (g / sqrt (ta * ta - 1)) }
   atanh ta = Tensor { val = atanh (val ta), vjp = \g -> vjp ta (g / (1 - ta * ta)) }
 
-
 d_dx :: Num a => (Tensor a -> Tensor a) -> Tensor a -> Tensor a
 d_dx f x = head . grad ["x"] . f $ tag "x" x
-
 
 main :: IO ()
 main =
