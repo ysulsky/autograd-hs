@@ -1,62 +1,69 @@
 import qualified Data.Map
 
-data Tensor a = Scalar a (VJP a)
-type VJP a = Tensor a -> [(String, Tensor a)]
+data Tensor a = Tensor {
+  val :: a,
+  vjp :: Tensor a -> [(String, Tensor a)]
+}
 
 tag :: String -> Tensor a -> Tensor a
-tag name (Scalar x vjp) = Scalar x (\g -> (name, g) : vjp g)
+tag name tensor = tensor { vjp = \g -> (name, g) : filter ((/= name) . fst) (vjp tensor g) }
 
 grad :: Num a => [String] -> Tensor a -> [Tensor a]
-grad keys (Scalar _ vjp) = mapM lookup_exn keys accumulate_keys
-  where accumulate_keys = Data.Map.fromListWith ( + ) (vjp 1)
+grad keys tensor = mapM lookup_exn keys accumulate_keys
+  where accumulate_keys = Data.Map.fromListWith ( + ) (vjp tensor 1)
         lookup_exn key map = let (Just ret) = Data.Map.lookup key map in ret
 
 stopgrad :: Tensor a -> Tensor a
-stopgrad (Scalar x _) = Scalar x (\g -> [])
+stopgrad tensor = tensor { vjp = \g -> [] }
         
 instance Eq a => Eq (Tensor a) where
-  (Scalar a _) == (Scalar b _) = a == b
+  ta == tb = val ta == val tb
 
 instance Ord a => Ord (Tensor a) where
-  compare (Scalar a _) (Scalar b _) = compare a b
+  compare ta tb = compare (val ta) (val tb)
 
 instance Show a => Show (Tensor a) where
-  show (Scalar x _) = show x
+  show = show . val
 
 instance Num a => Num (Tensor a) where
-  sa@(Scalar a vjpa) * sb@(Scalar b vjpb) = Scalar (a * b) (\g -> vjpa (g * sb) ++ vjpb (g * sa))
-  (Scalar a vjpa) + (Scalar b vjpb) = Scalar (a + b) (\g -> vjpa g ++ vjpb g)
-  abs sa@(Scalar a vjp) = Scalar (abs a) (\g -> vjp (signum sa * g))
-  fromInteger a = Scalar (fromInteger a) (\g -> [])
-  negate (Scalar a vjp) = Scalar (negate a) (\g -> vjp (negate g))
-  signum (Scalar a vjp) = Scalar (signum a) (\g -> vjp 0)
+  ta * tb = Tensor { val = val ta * val tb, vjp = \g -> vjp ta (g * tb) ++ vjp tb (g * ta) }
+  ta + tb = Tensor { val = val ta + val tb, vjp = \g -> vjp ta g ++ vjp tb g }
+  abs ta = Tensor { val = abs (val ta), vjp = \g -> vjp ta (g * signum ta) }
+  fromInteger v = Tensor { val = fromInteger v, vjp = \g -> [] }
+  negate ta = Tensor { val = negate (val ta), vjp = \g -> vjp ta (negate g) }
+  signum ta = Tensor { val = signum (val ta), vjp = \g -> vjp ta 0 }
 
 instance Fractional a => Fractional (Tensor a) where
-  recip sa@(Scalar a vjp) = Scalar (recip a) (\g -> vjp (-g/(sa*sa)))
-  fromRational a = Scalar (fromRational a) (\g -> [])
+  recip ta = Tensor { val = recip (val ta), vjp = \g -> vjp ta (-g / (ta * ta)) }
+  fromRational v = Tensor { val = fromRational v, vjp = \g -> [] }
 
 instance Floating a => Floating (Tensor a) where
-  pi = Scalar pi (\g -> [])
-  exp sa@(Scalar a vjp) = Scalar (exp a) (\g -> vjp (g * exp sa))
-  log sa@(Scalar a vjp) = Scalar (log a) (\g -> vjp (g / sa))
-  sin sa@(Scalar a vjp) = Scalar (sin a) (\g -> vjp (g * cos sa))
-  cos sa@(Scalar a vjp) = Scalar (cos a) (\g -> vjp (-g * sin sa))
-  asin sa@(Scalar a vjp) = Scalar (asin a) (\g -> vjp (g / sqrt (1 - sa * sa)))
-  acos sa@(Scalar a vjp) = Scalar (acos a) (\g -> vjp (-g / sqrt (1 - sa * sa)))
-  atan sa@(Scalar a vjp) = Scalar (atan a) (\g -> vjp (g / (sa * sa + 1)))
-  sinh sa@(Scalar a vjp) = Scalar (sinh a) (\g -> vjp (g * cosh sa))
-  cosh sa@(Scalar a vjp) = Scalar (cosh a) (\g -> vjp (g * sinh sa))
-  asinh sa@(Scalar a vjp) = Scalar (asinh a) (\g -> vjp (g / sqrt (sa * sa + 1)))
-  acosh sa@(Scalar a vjp) = Scalar (acosh a) (\g -> vjp (g / sqrt (sa * sa - 1)))
-  atanh sa@(Scalar a vjp) = Scalar (atanh a) (\g -> vjp (g / (1 - sa * sa)))
+  pi = Tensor { val = pi, vjp = \g -> [] }
+  exp ta = Tensor { val = exp (val ta), vjp = \g -> vjp ta (g * exp ta) }
+  log ta = Tensor { val = log (val ta), vjp = \g -> vjp ta (g / ta) }
+  sin ta = Tensor { val = sin (val ta), vjp = \g -> vjp ta (g * cos ta) }
+  cos ta = Tensor { val = cos (val ta), vjp = \g -> vjp ta (-g * sin ta) }
+  asin ta = Tensor { val = asin (val ta), vjp = \g -> vjp ta (g / sqrt (1 - ta * ta)) }
+  acos ta = Tensor { val = acos (val ta), vjp = \g -> vjp ta (-g / sqrt (1 - ta * ta)) }
+  atan ta = Tensor { val = atan (val ta), vjp = \g -> vjp ta (g / (ta * ta + 1)) }
+  sinh ta = Tensor { val = sinh (val ta), vjp = \g -> vjp ta (g * cosh ta) }
+  cosh ta = Tensor { val = cosh (val ta), vjp = \g -> vjp ta (g * sinh ta) }
+  asinh ta = Tensor { val = asinh (val ta), vjp = \g -> vjp ta (g / sqrt (ta * ta + 1)) }
+  acosh ta = Tensor { val = acosh (val ta), vjp = \g -> vjp ta (g / sqrt (ta * ta - 1)) }
+  atanh ta = Tensor { val = atanh (val ta), vjp = \g -> vjp ta (g / (1 - ta * ta)) }
+
+
+d_dx :: Num a => (Tensor a -> Tensor a) -> Tensor a -> Tensor a
+d_dx f x = head . grad ["x"] . f $ tag "x" x
+
 
 main :: IO ()
 main =
-  let x = tag "x" 4
-      f = x ^ 2 + stopgrad (3 * x)
-      [f'] = grad ["x"] f
-      [f''] = grad ["x"] f'
+  let f x = x ^ 2 + stopgrad (3 * x)
+      f'  = d_dx f
+      f'' = d_dx f'
+      x = 4
   in do putStrLn $ "x = " ++ show x
-        putStrLn $ "f(x) = " ++ show f
-        putStrLn $ "f'(x) = " ++ show f'
-        putStrLn $ "f''(x) = " ++ show f''
+        putStrLn $ "f(x) = " ++ show (f x)
+        putStrLn $ "f'(x) = " ++ show (f' x)
+        putStrLn $ "f''(x) = " ++ show (f'' x)
